@@ -1,7 +1,8 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: ta-dep-name
+  name: testapp-deployment
+  namespace: my-namespace      
 spec:
   replicas: 3
   selector:
@@ -12,8 +13,10 @@ spec:
       labels:
         app: testapp
     spec:
+      nodeSelector:             
+        kubernetes.io/hostname: minikube   
       containers:
-        - name: testapp-container-name
+        - name: testapp
           image: testapp:latest
           imagePullPolicy: Never
           ports:
