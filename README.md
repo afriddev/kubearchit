@@ -1,188 +1,211 @@
-# 🚀 Kubernetes + Minikube + React App Setup Guide
+# Production-Grade Kubernetes Setup for FastAPI Backend with NGINX Ingress
 
-This guide combines Kubernetes core commands and a full React app deployment workflow using Minikube.
+This project deploys a FastAPI backend on a Minikube cluster (bare-metal Kubernetes) on a GCP instance (external IP: 35.224.185.200). It uses NGINX Ingress for routing and a host-level NGINX reverse proxy for persistent external access without `kubectl port-forward`, mimicking production-grade bare-metal setups.
 
----
-
-## 🧩 Prerequisites
-
-Ensure Docker, Node.js, and Minikube are installed.  
-Then, add your current user to the Docker group:
-
-```bash
-sudo usermod -aG docker $USER && newgrp docker
-```
-
----
-
-## ⚙️ Start & Manage Kubernetes Cluster
-
-```bash
-minikube start --driver=docker --memory 5120 --cpus 5
-kubectl get nodes
-```
-
-### 🧱 Node Management
-
-- **Add Node**
+## Prerequisites
+- GCP instance with all ports allowed in firewall (80, 30808).
+- Minikube, Docker, kubectl, and NGINX installed:
   ```bash
-  minikube node add --cpus 2 --memory 2048
+  sudo apt update
+  sudo apt install -y nginx
+  ```
+- Minikube cluster running with Docker driver:
+  ```bash
+  minikube start --driver=docker --memory=5120 --cpus=5 --listen-address=0.0.0.0
   ```
 
-- **Delete Node**
-  ```bash
-  minikube node delete minikube-m02
-  ```
+## Files and Setup
 
-- **View Pods per Node**
-  ```bash
-  kubectl get pods -o wide --field-selector spec.nodeName=minikube-m02
-  ```
+### Backend FastAPI Application
+`main.py`: FastAPI app serving a simple endpoint.
+```python
+from fastapi import FastAPI
+import logging
 
----
+app = FastAPI()
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
-## 🧠 React App Creation
-
-```bash
-npm create vite@latest testapp -- --template react
-cd testapp
-npm install
-npm run build
+@app.get("/")
+async def root():
+    logger.info("Received request at /")
+    return {"message": "Hello from FastAPI"}
 ```
 
----
+`requirements.txt`: Dependencies.
+```text
+fastapi==0.115.0
+uvicorn==0.30.6
+python-json-logger==2.0.7
+```
 
-## 🐳 Dockerfile
-
-```Dockerfile
-FROM node:22-alpine
+`backend.Dockerfile`: Docker image for backend.
+```dockerfile
+FROM python:3.11-slim
 WORKDIR /app
-COPY package*.json ./
-RUN npm install
-COPY . .
-RUN npm run build
-RUN npm install -g serve
-EXPOSE 3000
-CMD ["serve", "-s", "dist", "-l", "3000"]
+COPY requirements.txt .
+RUN pip install -r requirements.txt
+COPY main.py .
+EXPOSE 8000
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
 ```
 
-### 🏗️ Build & Load Docker Image
-
+### Build and Load Backend Image
 ```bash
-docker build -t testapp:latest .
-minikube image load testapp:latest --daemon
-minikube image ls | grep testapp
+docker build -t backend:latest -f backend.Dockerfile .
+minikube image load backend:latest
 ```
 
----
-
-## 🚢 Kubernetes Deployment
-
+### Backend Deployment
+`backend-deployment.yaml`: Deploys 3 backend pods.
 ```yaml
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: testapp-deployment
+  name: backend-deployment
 spec:
   replicas: 3
   selector:
     matchLabels:
-      app: testapp
+      app: backend
   template:
     metadata:
       labels:
-        app: testapp
+        app: backend
     spec:
       containers:
-        - name: testapp
-          image: testapp:latest
+        - name: backend
+          image: backend:latest
           imagePullPolicy: Never
           ports:
-            - containerPort: 3000
+            - containerPort: 8000
 ```
 
-```bash
-kubectl apply -f deployment.yaml
-kubectl get pods -o wide
-kubectl describe pod testapp-deployment
-```
+Apply: `kubectl apply -f backend-deployment.yaml`
 
----
-
-## 🌐 Service Configuration
-
+### Backend Service
+`backend-nodeport.yaml`: Exposes backend internally.
 ```yaml
 apiVersion: v1
 kind: Service
 metadata:
-  name: testapp-service
+  name: backend-nodeport
 spec:
   type: NodePort
   selector:
-    app: testapp
+    app: backend
   ports:
-    - port: 3000
-      targetPort: 3000
-      nodePort: 30080
+    - port: 8000
+      targetPort: 8000
+      nodePort: 30000
 ```
 
+Apply: `kubectl apply -f backend-nodeport.yaml`
+
+### NGINX Ingress
+Enable NGINX Ingress controller:
 ```bash
-kubectl apply -f service.yaml
-kubectl get svc
+minikube addons enable ingress
 ```
 
----
-
-## ☸️ LoadBalancer / Tunnel Access
-
+Wait for the controller pod to be ready (1/1):
 ```bash
-kubectl patch svc testapp-service -p '{"spec": {"type": "LoadBalancer"}}'
-kubectl get svc testapp-service
-
-sudo nohup minikube tunnel > /dev/null 2>&1 &
-nohup kubectl port-forward service/testapp-service 3000:3000 --address=0.0.0.0 > /dev/null 2>&1 &
+kubectl get pods -n ingress-nginx -w
 ```
 
----
+`ingress.yaml`: Routes traffic to backend.
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: backend-ingress
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  rules:
+    - http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: backend-nodeport
+                port:
+                  number: 8000
+```
 
-## 🧰 Useful Kubernetes Commands
+Apply: `kubectl apply -f ingress.yaml`
 
-| Action | Command |
-|--------|----------|
-| Get all pods | `kubectl get pods -o wide` |
-| Get pods in specific node | `kubectl get pods -o wide --field-selector spec.nodeName=node1` |
-| Delete a pod | `kubectl delete pod <pod-name>` |
-| Check pod logs | `kubectl logs <pod-name>` |
-| Describe pod errors | `kubectl describe pod <pod-name>` |
-| Forward ports to localhost | `kubectl port-forward pod/<pod-name> 3000:3000` |
-| Get services | `kubectl get svc` |
-| Apply a YAML file | `kubectl apply -f <file>.yaml` |
-| Delete a resource | `kubectl delete -f <file>.yaml` |
+`ingress-nodeport.yaml`: Exposes Ingress controller on NodePort 30808.
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: ingress-nginx-controller-nodeport
+  namespace: ingress-nginx
+spec:
+  type: NodePort
+  selector:
+    app.kubernetes.io/name: ingress-nginx
+    app.kubernetes.io/instance: ingress-nginx
+  ports:
+    - port: 8080
+      targetPort: 80
+      nodePort: 30808
+      name: http
+```
 
----
+Apply: `kubectl apply -f ingress-nodeport.yaml`
 
-## ✅ Verification
+### Host NGINX Reverse Proxy
+Configure NGINX on the GCP instance to proxy `35.224.185.200:80` to Minikube’s Ingress NodePort (`192.168.49.2:30808`).
 
-Once everything is deployed, check your app:
+Create `/etc/nginx/sites-available/k8s-proxy`:
+```nginx
+server {
+    listen 80;
+    server_name 35.224.185.200;
 
+    location / {
+        proxy_pass http://192.168.49.2:30808;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+```
+
+Enable and restart NGINX:
 ```bash
-minikube service testapp-service
+sudo ln -sf /etc/nginx/sites-available/k8s-proxy /etc/nginx/sites-enabled/
+sudo nginx -t
+sudo systemctl restart nginx
 ```
 
-or access via NodePort:
-
+### Verify Setup
+Check pods, services, and Ingress:
+```bash
+kubectl get pods -l app=backend -o wide
+kubectl get svc -n ingress-nginx
+kubectl get ingress
 ```
-http://<minikube-ip>:30080
+
+Test external access (expect: `{"message":"Hello from FastAPI"}`):
+```bash
+curl http://35.224.185.200
 ```
 
----
+## Notes
+- **Why NGINX Reverse Proxy?** Minikube’s Docker driver binds NodePorts to `127.0.0.1` or internal IPs (192.168.49.2). The host NGINX reverse proxy routes traffic from `35.224.185.200:80` to `192.168.49.2:30808`, providing persistent access without `port-forward`.
+- **Production Considerations**: In a true production bare-metal setup, use MetalLB for LoadBalancer services or a hardware load balancer. For GCP, consider GKE with a cloud LoadBalancer.
+- **Frontend**: Can be added with a similar Dockerized setup and Ingress routing.
 
-### 📄 Summary
-
-This setup covers:
-- Docker + Minikube + React workflow
-- Cluster node operations
-- Pod & Service management
-- LoadBalancer access for production-like environments
-
-Perfect for local Kubernetes testing or small-scale production demos. 🚀
+## Troubleshooting
+- If `curl http://35.224.185.200` fails, verify NGINX:
+  ```bash
+  sudo nginx -t
+  sudo systemctl status nginx
+  ```
+- Test internal Ingress: `curl http://192.168.49.2:30808`
+- Check Ingress pod logs: `kubectl logs -n ingress-nginx -l app.kubernetes.io/name=ingress-nginx`
