@@ -1,29 +1,10 @@
-## Production-Grade Kubernetes Setup for FastAPI Backend with NGINX Ingress
+#!/bin/bash
+set -e
 
-This setup deploys a **FastAPI backend** on a **Minikube (bare-metal)** cluster running on a **GCP instance** (`35.224.185.200`).  
-It uses **Kubernetes Ingress** and a **host-level NGINX reverse proxy** for persistent external access 
+echo "🚀 Starting setup..."
 
----
-
-## ⚙️ Prerequisites
-
-- GCP VM with firewall open for **ports 80 and 30808**  
-- Installed:
-  ```bash
-  sudo apt update
-  sudo apt install -y docker.io kubectl minikube nginx
-  ```
-- Start cluster:
-  ```bash
-  minikube start --driver=docker --memory=8192 --cpus=6
-  ```
-
----
-
-## 🧠 FastAPI Backend
-
-### `main.py`
-```python
+# Create project files
+cat << 'EOF' > main.py
 from fastapi import FastAPI
 import logging
 
@@ -35,17 +16,15 @@ logger = logging.getLogger(__name__)
 async def root():
     logger.info("Received request at /")
     return {"message": "Hello from FastAPI"}
-```
+EOF
 
-### `requirements.txt`
-```
+cat << 'EOF' > requirements.txt
 fastapi==0.115.0
 uvicorn==0.30.6
 python-json-logger==2.0.7
-```
+EOF
 
-### `backend.Dockerfile`
-```dockerfile
+cat << 'EOF' > backend.Dockerfile
 FROM python:3.11-slim
 WORKDIR /app
 COPY requirements.txt .
@@ -53,20 +32,9 @@ RUN pip install -r requirements.txt
 COPY main.py .
 EXPOSE 8000
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
-```
+EOF
 
-Build and load:
-```bash
-docker build -t backend:latest -f backend.Dockerfile .
-minikube image load backend:latest
-```
-
----
-
-## ☸️ Kubernetes Manifests
-
-### `backend-deployment.yaml`
-```yaml
+cat << 'EOF' > backend-deployment.yaml
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -87,10 +55,9 @@ spec:
           imagePullPolicy: Never
           ports:
             - containerPort: 8000
-```
+EOF
 
-### `backend-nodeport.yaml`
-```yaml
+cat << 'EOF' > backend-nodeport.yaml
 apiVersion: v1
 kind: Service
 metadata:
@@ -103,10 +70,9 @@ spec:
     - port: 8000
       targetPort: 8000
       nodePort: 30000
-```
+EOF
 
-### `ingress.yaml`
-```yaml
+cat << 'EOF' > ingress.yaml
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -124,10 +90,9 @@ spec:
                 name: backend-nodeport
                 port:
                   number: 8000
-```
+EOF
 
-### `ingress-nodeport.yaml`
-```yaml
+cat << 'EOF' > ingress-nodeport.yaml
 apiVersion: v1
 kind: Service
 metadata:
@@ -143,10 +108,9 @@ spec:
       targetPort: 80
       nodePort: 30808
       name: http
-```
+EOF
 
-### `k8s-proxy` (NGINX Reverse Proxy)
-```nginx
+cat << 'EOF' > k8s-proxy
 server {
     listen 80;
     server_name 35.224.185.200;
@@ -159,18 +123,10 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 }
-```
+EOF
 
-
-Run yaml files
-
-
-```sh
-#!/bin/bash
-set -e
-
-minikube start --driver=docker --memory=10192 --cpus=6 
-
+echo "🐳 Starting Minikube and deploying..."
+minikube start --driver=docker --memory=8192 --cpus=6
 docker build -t backend:latest -f backend.Dockerfile .
 minikube image load backend:latest
 
@@ -183,13 +139,10 @@ while [[ $(kubectl get pods -n ingress-nginx -l app.kubernetes.io/name=ingress-n
   echo "   ➤ Waiting for ingress-nginx-controller..."
   sleep 5
 done
-```
 
-Run ngnix and ingress config
-
-```bash
 kubectl apply -f ingress.yaml
 kubectl apply -f ingress-nodeport.yaml
+
 sudo apt update -y
 sudo apt install -y nginx
 sudo cp ./k8s-proxy /etc/nginx/sites-available/k8s-proxy
@@ -198,27 +151,4 @@ sudo nginx -t
 sudo systemctl restart nginx
 
 echo "✅ Deployment complete!"
-echo "🌍 Test your API externally:"
-echo "curl http://35.224.185.200"
-```
-
-
-
----
-
-## ✅ Verify Setup
-```bash
-kubectl get pods -l app=backend -o wide
-kubectl get svc -n ingress-nginx
-kubectl get ingress
-curl http://35.224.185.200
-```
-
-Expected Output:
-```json
-{"message": "Hello from FastAPI"}
-```
-
----
-
-
+echo "🌍 Access your API at: http://35.224.185.200"
