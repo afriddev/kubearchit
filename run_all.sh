@@ -2,7 +2,7 @@
 set -e
 
 echo "🚀 Starting Minikube..."
-minikube start --driver=docker --memory=10192 --cpus=6 --listen-address=0.0.0.0
+minikube start --driver=docker --memory=10192 --cpus=6 
 
 echo "🐳 Building and loading backend image..."
 docker build -t backend:latest -f backend.Dockerfile .
