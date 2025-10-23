@@ -6,7 +6,27 @@ data:
   prometheus.yml: |
     global:
       scrape_interval: 10s
+
     scrape_configs:
+      - job_name: 'kubernetes-pods'
+        kubernetes_sd_configs:
+          - role: pod
+        authorization:
+          credentials_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+
       - job_name: 'fastapi'
+        metrics_path: /metrics
         static_configs:
-          - targets: ['backend-nodeport:8000']
+          - targets: ['backend-service:8000']
+
+      - job_name: 'node-exporter'
+        static_configs:
+          - targets: ['10.106.229.91:9100']
+
+      - job_name: 'kube-state-metrics'
+        static_configs:
+          - targets: ['kube-state-metrics.kube-system.svc.cluster.local:8080']
+
+      - job_name: 'cadvisor'
+        static_configs:
+          - targets: ['cadvisor.kube-system.svc.cluster.local:8080']

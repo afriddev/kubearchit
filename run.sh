@@ -1,80 +1,61 @@
-# 🚀 Production-Grade Kubernetes Stack (FastAPI + ELK + Prometheus + Grafana)
+#!/bin/bash
+set -e
 
-This README provides all files and instructions to deploy a production-like Kubernetes stack on Minikube, including:
-- 🧩 **FastAPI** backend with JSON logging and Prometheus metrics
-- 🔍 **Elasticsearch** for log storage
-- ⚙️ **Logstash** for log aggregation
-- 📊 **Prometheus** for metrics collection
-- 🎨 **Grafana** for visualization
-- 🌐 **NGINX reverse proxy** for external access (no port-forwarding)
+# Define project directory
+PROJECT_DIR=~/kubearchit
 
-The stack is exposed via a unified Ingress and a host-level NGINX proxy on a GCP VM.
+# Create project directory if it doesn't exist
+mkdir -p "$PROJECT_DIR"
+cd "$PROJECT_DIR"
 
----
+# Function to create a file with content
+create_file() {
+  local file="$1"
+  local content="$2"
+  echo "Creating $file..."
+  echo "$content" > "$file"
+  chmod 644 "$file"  # Set read/write permissions for owner, read for others
+}
 
-## ⚙️ Prerequisites
+# Function to create an executable script
+create_executable() {
+  local file="$1"
+  local content="$2"
+  echo "Creating $file..."
+  echo "$content" > "$file"
+  chmod 755 "$file"  # Set executable permissions
+}
 
-- **GCP VM**: >= 30 GB disk, ports `80` and `30808` open
-- **Tools**:
-  ```bash
-  sudo apt update
-  sudo apt install -y docker.io kubectl minikube nginx
-  ```
-- **Minikube Setup**:
-  ```bash
-  minikube start --driver=docker --memory=8192 --cpus=6 --disk-size=40g --listen-address=0.0.0.0
-  ```
-
----
-
-## 📋 Files Index
-
-Create these files in your project root:
-- `main.py`
-- `requirements.txt`
-- `backend.Dockerfile`
-- `backend-deployment.yaml`
-- `backend-service.yaml`
-- `backend-nodeport.yaml`
-- `unified-ingress.yaml`
-- `ingress-nodeport.yaml`
-- `elasticsearch-deployment.yaml`
-- `elasticsearch-service.yaml`
-- `logstash-pipeline-config.yaml`
-- `logstash-deployment.yaml`
-- `logstash-service.yaml`
-- `prometheus-config.yaml`
-- `prometheus-deployment.yaml`
-- `prometheus-service.yaml`
-- `grafana-deployment.yaml`
-- `grafana-service.yaml`
-- `k8s-proxy`
-- `run_full_stack.sh`
-- `reset_k8s.sh`
-- `README.md` (this file)
-
----
-
-## 🧠 FastAPI Backend
-
-### main.py
-```python
-from fastapi import FastAPI
+# File: main.py
+create_file "main.py" 'from fastapi import FastAPI
 from prometheus_fastapi_instrumentator import Instrumentator
 import logging
 from pythonjsonlogger import jsonlogger
-import socket
+import logging.handlers
+import time
 
 app = FastAPI()
 
 # Configure logger for Logstash
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
-logstash_handler = logging.StreamHandler(socket.socket(socket.AF_INET, socket.SOCK_STREAM))
-logstash_handler.socket.connect(('logstash', 5044))  # Connect to Logstash service
-formatter = jsonlogger.JsonFormatter('%(asctime)s %(levelname)s %(message)s')
-logstash_handler.setFormatter(formatter)
-logger.addHandler(logstash_handler)
+
+# Attempt to connect to Logstash with retries
+def setup_logstash_handler():
+    for _ in range(5):  # Retry 5 times
+        try:
+            logstash_handler = logging.handlers.SocketHandler("logstash", 5044)
+            formatter = jsonlogger.JsonFormatter("%(asctime)s %(levelname)s %(message)s")
+            logstash_handler.setFormatter(formatter)
+            logger.addHandler(logstash_handler)
+            logger.info("Connected to Logstash")
+            return
+        except Exception as e:
+            logger.warning(f"Failed to connect to Logstash: {e}")
+            time.sleep(2)  # Wait before retrying
+    logger.error("Could not connect to Logstash after retries")
+
+setup_logstash_handler()
 
 # Enable Prometheus metrics
 Instrumentator().instrument(app).expose(app)
@@ -82,35 +63,25 @@ Instrumentator().instrument(app).expose(app)
 @app.get("/")
 async def root():
     logger.info("Received request at /")
-    return {"message": "Hello from FastAPI"}
-```
+    return {"message": "Hello from FastAPI"}'
 
-### requirements.txt
-```
-fastapi==0.115.0
+# File: requirements.txt
+create_file "requirements.txt" 'fastapi==0.115.0
 uvicorn==0.30.6
 python-json-logger==2.0.7
-prometheus-fastapi-instrumentator==6.0.0
-```
+prometheus-fastapi-instrumentator==6.0.0'
 
-### backend.Dockerfile
-```dockerfile
-FROM python:3.11-slim
+# File: backend.Dockerfile
+create_file "backend.Dockerfile" 'FROM python:3.11-slim
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install -r requirements.txt
 COPY main.py .
 EXPOSE 8000
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
-```
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]'
 
----
-
-## 🛠️ Kubernetes Manifests
-
-### backend-deployment.yaml
-```yaml
-apiVersion: apps/v1
+# File: backend-deployment.yaml
+create_file "backend-deployment.yaml" 'apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: backend-deployment
@@ -136,12 +107,10 @@ spec:
               cpu: "100m"
             limits:
               memory: "256Mi"
-              cpu: "500m"
-```
+              cpu: "500m"'
 
-### backend-service.yaml
-```yaml
-apiVersion: v1
+# File: backend-service.yaml
+create_file "backend-service.yaml" 'apiVersion: v1
 kind: Service
 metadata:
   name: backend-service
@@ -151,12 +120,10 @@ spec:
     app: backend
   ports:
     - port: 8000
-      targetPort: 8000
-```
+      targetPort: 8000'
 
-### backend-nodeport.yaml
-```yaml
-apiVersion: v1
+# File: backend-nodeport.yaml
+create_file "backend-nodeport.yaml" 'apiVersion: v1
 kind: Service
 metadata:
   name: backend-nodeport
@@ -167,16 +134,10 @@ spec:
   ports:
     - port: 8000
       targetPort: 8000
-      nodePort: 30000
-```
+      nodePort: 30000'
 
----
-
-## 🌐 Ingress
-
-### unified-ingress.yaml
-```yaml
-apiVersion: networking.k8s.io/v1
+# File: unified-ingress.yaml
+create_file "unified-ingress.yaml" 'apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: unified-ingress
@@ -199,12 +160,10 @@ spec:
               service:
                 name: backend-service
                 port:
-                  number: 8000
-```
+                  number: 8000'
 
-### ingress-nodeport.yaml
-```yaml
-apiVersion: v1
+# File: ingress-nodeport.yaml
+create_file "ingress-nodeport.yaml" 'apiVersion: v1
 kind: Service
 metadata:
   name: ingress-nginx-controller-nodeport
@@ -218,74 +177,10 @@ spec:
     - port: 80
       targetPort: 80
       nodePort: 30808
-      name: http
-```
+      name: http'
 
----
-
-## 🎨 Grafana
-
-### grafana-deployment.yaml
-```yaml
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: grafana
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: grafana
-  template:
-    metadata:
-      labels:
-        app: grafana
-    spec:
-      containers:
-        - name: grafana
-          image: grafana/grafana:10.4.2
-          env:
-            - name: GF_SECURITY_ADMIN_USER
-              value: admin
-            - name: GF_SECURITY_ADMIN_PASSWORD
-              value: admin
-            - name: GF_SERVER_ROOT_URL
-              value: /grafana
-            - name: GF_SERVER_SERVE_FROM_SUB_PATH
-              value: "true"
-          ports:
-            - containerPort: 3000
-          resources:
-            requests:
-              memory: "256Mi"
-              cpu: "100m"
-            limits:
-              memory: "512Mi"
-              cpu: "500m"
-```
-
-### grafana-service.yaml
-```yaml
-apiVersion: v1
-kind: Service
-metadata:
-  name: grafana
-spec:
-  type: ClusterIP
-  selector:
-    app: grafana
-  ports:
-    - port: 3000
-      targetPort: 3000
-```
-
----
-
-## 🔍 Elasticsearch
-
-### elasticsearch-deployment.yaml
-```yaml
-apiVersion: apps/v1
+# File: elasticsearch-deployment.yaml
+create_file "elasticsearch-deployment.yaml" 'apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: elasticsearch
@@ -319,12 +214,10 @@ spec:
               cpu: "500m"
             limits:
               memory: "2Gi"
-              cpu: "1"
-```
+              cpu: "1"'
 
-### elasticsearch-service.yaml
-```yaml
-apiVersion: v1
+# File: elasticsearch-service.yaml
+create_file "elasticsearch-service.yaml" 'apiVersion: v1
 kind: Service
 metadata:
   name: elasticsearch
@@ -334,16 +227,10 @@ spec:
     app: elasticsearch
   ports:
     - port: 9200
-      targetPort: 9200
-```
+      targetPort: 9200'
 
----
-
-## ⚙️ Logstash
-
-### logstash-pipeline-config.yaml
-```yaml
-apiVersion: v1
+# File: logstash-pipeline-config.yaml
+create_file "logstash-pipeline-config.yaml" 'apiVersion: v1
 kind: ConfigMap
 metadata:
   name: logstash-pipeline
@@ -360,12 +247,10 @@ data:
         hosts => ["http://elasticsearch:9200"]
         index => "fastapi-logs-%{+YYYY.MM.dd}"
       }
-    }
-```
+    }'
 
-### logstash-deployment.yaml
-```yaml
-apiVersion: apps/v1
+# File: logstash-deployment.yaml
+create_file "logstash-deployment.yaml" 'apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: logstash
@@ -400,12 +285,10 @@ spec:
       volumes:
         - name: pipeline
           configMap:
-            name: logstash-pipeline
-```
+            name: logstash-pipeline'
 
-### logstash-service.yaml
-```yaml
-apiVersion: v1
+# File: logstash-service.yaml
+create_file "logstash-service.yaml" 'apiVersion: v1
 kind: Service
 metadata:
   name: logstash
@@ -415,16 +298,10 @@ spec:
     app: logstash
   ports:
     - port: 5044
-      targetPort: 5044
-```
+      targetPort: 5044'
 
----
-
-## 📊 Prometheus
-
-### prometheus-config.yaml
-```yaml
-apiVersion: v1
+# File: prometheus-config.yaml
+create_file "prometheus-config.yaml" 'apiVersion: v1
 kind: ConfigMap
 metadata:
   name: prometheus-config
@@ -433,18 +310,18 @@ data:
     global:
       scrape_interval: 10s
     scrape_configs:
-      - job_name: 'kubernetes-pods'
+      - job_name: '"'"'kubernetes-pods'"'"'
         kubernetes_sd_configs:
           - role: pod
-      - job_name: 'fastapi'
+        authorization:
+          credentials_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+      - job_name: '"'"'fastapi'"'"'
         metrics_path: /metrics
         static_configs:
-          - targets: ['backend-service:8000']
-```
+          - targets: ['"'"'backend-service:8000'"'"']'
 
-### prometheus-deployment.yaml
-```yaml
-apiVersion: apps/v1
+# File: prometheus-deployment.yaml
+create_file "prometheus-deployment.yaml" 'apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: prometheus
@@ -458,6 +335,7 @@ spec:
       labels:
         app: prometheus
     spec:
+      serviceAccountName: prometheus
       containers:
         - name: prometheus
           image: prom/prometheus:v2.53.1
@@ -478,12 +356,10 @@ spec:
       volumes:
         - name: config
           configMap:
-            name: prometheus-config
-```
+            name: prometheus-config'
 
-### prometheus-service.yaml
-```yaml
-apiVersion: v1
+# File: prometheus-service.yaml
+create_file "prometheus-service.yaml" 'apiVersion: v1
 kind: Service
 metadata:
   name: prometheus
@@ -493,18 +369,94 @@ spec:
     app: prometheus
   ports:
     - port: 9090
-      targetPort: 9090
-```
+      targetPort: 9090'
 
+# File: prometheus-rbac.yaml
+create_file "prometheus-rbac.yaml" 'apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: prometheus
+  namespace: default
 ---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: prometheus
+rules:
+- apiGroups: [""]
+  resources: ["nodes", "services", "endpoints", "pods"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["extensions", "networking.k8s.io"]
+  resources: ["ingresses"]
+  verbs: ["get", "list", "watch"]
+- nonResourceURLs: ["/metrics"]
+  verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: prometheus
+subjects:
+- kind: ServiceAccount
+  name: prometheus
+  namespace: default
+roleRef:
+  kind: ClusterRole
+  name: prometheus
+  apiGroup: rbac.authorization.k8s.io'
 
-## 🌐 Host NGINX Reverse Proxy
+# File: grafana-deployment.yaml
+create_file "grafana-deployment.yaml" 'apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: grafana
+  template:
+    metadata:
+      labels:
+        app: grafana
+    spec:
+      containers:
+        - name: grafana
+          image: grafana/grafana:10.4.2
+          env:
+            - name: GF_SECURITY_ADMIN_USER
+              value: admin
+            - name: GF_SECURITY_ADMIN_PASSWORD
+              value: admin
+            - name: GF_SERVER_ROOT_URL
+              value: /grafana
+            - name: GF_SERVER_SERVE_FROM_SUB_PATH
+              value: "true"
+          ports:
+            - containerPort: 3000
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"'
 
-### k8s-proxy
-Copy this to `/etc/nginx/sites-available/k8s-proxy` on the host VM.
+# File: grafana-service.yaml
+create_file "grafana-service.yaml" 'apiVersion: v1
+kind: Service
+metadata:
+  name: grafana
+spec:
+  type: ClusterIP
+  selector:
+    app: grafana
+  ports:
+    - port: 3000
+      targetPort: 3000'
 
-```nginx
-server {
+# File: k8s-proxy
+create_file "k8s-proxy" 'server {
     listen 80;
     server_name 35.224.185.200;
 
@@ -523,20 +475,10 @@ server {
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
     }
-}
-```
+}'
 
-**Notes**:
-- Replace `192.168.49.2` with the Minikube IP (`minikube ip`) if different.
-- Port `30808` matches `ingress-nodeport.yaml`.
-
----
-
-## 🤖 Automation Scripts
-
-### run_full_stack.sh
-```bash
-#!/bin/bash
+# File: run_full_stack.sh
+create_executable "run_full_stack.sh" '#!/bin/bash
 set -e
 
 # Clean up
@@ -549,11 +491,9 @@ minikube start --driver=docker --memory=8192 --cpus=6 --disk-size=40g --listen-a
 # Build and load FastAPI image
 docker build -t backend:latest -f backend.Dockerfile .
 minikube image load backend:latest
-# Enable Ingress
-minikube addons enable ingress
-kubectl create namespace ingress-nginx
 
-# Apply manifests
+# Apply manifests (excluding ingress-nodeport.yaml for now)
+kubectl apply -f prometheus-rbac.yaml
 kubectl apply -f backend-deployment.yaml
 kubectl apply -f backend-service.yaml
 kubectl apply -f backend-nodeport.yaml
@@ -568,6 +508,16 @@ kubectl apply -f prometheus-service.yaml
 kubectl apply -f grafana-deployment.yaml
 kubectl apply -f grafana-service.yaml
 kubectl apply -f unified-ingress.yaml
+
+# Enable Ingress and wait for ingress-nginx namespace
+minikube addons enable ingress
+echo "Waiting for ingress-nginx namespace to be created..."
+until kubectl get namespace ingress-nginx >/dev/null 2>&1; do
+    sleep 2
+done
+echo "ingress-nginx namespace created."
+
+# Apply ingress-nodeport.yaml
 kubectl apply -f ingress-nodeport.yaml
 
 # Wait for deployments to be ready
@@ -576,8 +526,6 @@ kubectl wait --for=condition=available --timeout=300s deployment/elasticsearch
 kubectl wait --for=condition=available --timeout=300s deployment/logstash
 kubectl wait --for=condition=available --timeout=300s deployment/prometheus
 kubectl wait --for=condition=available --timeout=300s deployment/grafana
-
-
 
 # Configure host NGINX
 sudo apt update -y
@@ -594,12 +542,10 @@ echo "Backend: http://$MINIKUBE_IP:30808/ or http://35.224.185.200/"
 echo "Grafana: http://$MINIKUBE_IP:30808/grafana or http://35.224.185.200/grafana"
 echo "Grafana login: admin/admin"
 echo "Prometheus (internal): http://prometheus:9090"
-echo "Elasticsearch (internal): http://elasticsearch:9200"
-```
+echo "Elasticsearch (internal): http://elasticsearch:9200"'
 
-### reset_k8s.sh
-```bash
-#!/bin/bash
+# File: reset_k8s.sh
+create_executable "reset_k8s.sh" '#!/bin/bash
 set -e
 
 minikube delete --all --purge || true
@@ -607,96 +553,7 @@ docker system prune -a -f || true
 sudo rm -rf ~/.minikube ~/.kube || true
 sudo systemctl stop nginx || true
 sudo rm -f /etc/nginx/sites-enabled/k8s-proxy /etc/nginx/sites-available/k8s-proxy || true
-echo "Reset complete"
-```
+echo "Reset complete"'
 
----
-
-## ✅ How to Apply
-
-1. Save each code block into the respective files in your project root.
-2. Make scripts executable:
-   ```bash
-   chmod +x run_full_stack.sh reset_k8s.sh
-   ```
-3. Run the deployment:
-   ```bash
-   ./run_full_stack.sh
-   ```
-
----
-
-## 📊 Access Points
-
-| Service         | Type      | URL                          |
-|-----------------|-----------|------------------------------|
-| FastAPI Backend | Ingress   | http://35.224.185.200/       |
-| Grafana UI      | Ingress   | http://35.224.185.200/grafana |
-| Elasticsearch   | Internal  | http://elasticsearch:9200    |
-| Logstash        | Internal  | logstash:5044                |
-| Prometheus      | Internal  | http://prometheus:9090       |
-
-**Grafana Login**: `admin/admin`
-
----
-
-## 🛠️ Post-Deployment Setup
-
-1. **Grafana Configuration**:
-   - Access Grafana at `http://35.224.185.200/grafana`.
-   - Add Prometheus as a data source: `http://prometheus:9090`.
-   - Add Elasticsearch as a data source: `http://elasticsearch:9200`, index `fastapi-logs-*`.
-   - Create dashboards for FastAPI metrics (e.g., request count) and logs.
-
-2. **Verify Metrics**:
-   - Check Prometheus at `http://prometheus:9090` (internal) to confirm FastAPI metrics (`/metrics` endpoint).
-
-3. **Verify Logs**:
-   - Query Elasticsearch at `http://elasticsearch:9200/fastapi-logs-*/_search` to verify logs from FastAPI.
-
----
-
-## 🩺 Troubleshooting
-
-- **Minikube Disk Full**:
-  ```bash
-  docker system prune -a -f
-  minikube delete
-  ```
-  Increase GCP VM disk size if needed.
-
-- **Grafana Redirect Issues**:
-  Ensure `GF_SERVER_ROOT_URL=/grafana` and `GF_SERVER_SERVE_FROM_SUB_PATH=true` in `grafana-deployment.yaml`. Remove any `rewrite-target` annotations in `unified-ingress.yaml`.
-
-- **Ingress Not Working**:
-  Verify Minikube IP:
-  ```bash
-  minikube ip
-  ```
-  Update `k8s-proxy` with the correct IP if `192.168.49.2` is incorrect.
-
-- **Pod Issues**:
-  Check logs:
-  ```bash
-  kubectl logs -l app=backend
-  kubectl logs -l app=grafana
-  kubectl logs -l app=prometheus
-  kubectl logs -l app=elasticsearch
-  kubectl logs -l app=logstash
-  ```
-
-- **NGINX Errors**:
-  Test configuration:
-  ```bash
-  sudo nginx -t
-  ```
-
----
-
-## 🧩 Notes
-
-- The stack uses `unified-ingress.yaml` for simplified routing.
-- FastAPI logs are sent to Logstash in JSON format and stored in Elasticsearch.
-- Prometheus scrapes FastAPI metrics at `/metrics`.
-- All deployments include resource requests and limits for production readiness.
-- The setup assumes a GCP VM with public IP `35.224.185.200`. Adjust `k8s-proxy` if using a different IP.
+echo "All files created in $PROJECT_DIR"
+ls -l

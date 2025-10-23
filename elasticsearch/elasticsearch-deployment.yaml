@@ -20,6 +20,12 @@ spec:
           env:
             - name: discovery.type
               value: single-node
+            - name: xpack.security.enabled
+              value: "false"
+            - name: xpack.security.http.ssl.enabled
+              value: "false"
+            - name: ES_JAVA_OPTS
+              value: "-Xms1g -Xmx1g"
           resources:
             requests:
               memory: "1Gi"
