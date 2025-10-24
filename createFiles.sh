@@ -587,11 +587,24 @@ chmod 644 k8s-proxy
 cat > run_full_stack.sh <<'RUN'
 #!/bin/bash
 set -e
+
+echo "🔧 Cleaning old setup..."
 minikube delete --all --purge || true
 docker system prune -a -f || true
+
+echo "🚀 Starting Minikube..."
 minikube start --driver=docker --memory=8192 --cpus=6 --disk-size=40g --listen-address=0.0.0.0
+
+echo "🐳 Building FastAPI image..."
 docker build -t backend:latest -f backend.Dockerfile .
 minikube image load backend:latest
+
+echo "⚙️ Enabling Ingress..."
+minikube addons enable ingress
+kubectl create namespace ingress-nginx || true
+kubectl create namespace monitoring || true
+
+echo "📦 Deploying services..."
 kubectl apply -f prometheus-rbac.yaml
 kubectl apply -f backend-deployment.yaml
 kubectl apply -f backend-service.yaml
@@ -607,26 +620,41 @@ kubectl apply -f prometheus-service.yaml
 kubectl apply -f grafana-deployment.yaml
 kubectl apply -f grafana-service.yaml
 kubectl apply -f node-exporter.yaml
-kubectl create namespace monitoring || true
 kubectl apply -f kube-state-metrics.yaml
 kubectl apply -f cadvisor.yaml
+
+echo "⏳ Waiting for Ingress controller and admission webhook..."
+kubectl wait --for=condition=available --timeout=180s deployment/ingress-nginx-controller -n ingress-nginx || true
+kubectl wait --for=condition=available --timeout=180s deployment/ingress-nginx-admission -n ingress-nginx || true
+sleep 10
+
+echo "🌐 Applying Ingress configs..."
 kubectl apply -f unified-ingress.yaml
-minikube addons enable ingress
-until kubectl get namespace ingress-nginx >/dev/null 2>&1; do sleep 2; done
 kubectl apply -f ingress-nodeport.yaml
+
+echo "🕒 Waiting for main deployments..."
 kubectl wait --for=condition=available --timeout=300s deployment/backend-deployment || true
 kubectl wait --for=condition=available --timeout=300s deployment/elasticsearch || true
+kubectl wait --for=condition=available --timeout=300s deployment/logstash || true
 kubectl wait --for=condition=available --timeout=300s deployment/prometheus || true
 kubectl wait --for=condition=available --timeout=300s deployment/grafana || true
+
+echo "🌍 Configuring NGINX reverse proxy..."
 sudo apt update -y
 sudo apt install -y nginx
 sudo cp ./k8s-proxy /etc/nginx/sites-available/k8s-proxy
 sudo ln -sf /etc/nginx/sites-available/k8s-proxy /etc/nginx/sites-enabled/
 sudo nginx -t
 sudo systemctl restart nginx
+
 MINIKUBE_IP=$(minikube ip || echo "192.168.49.2")
+
+echo "✅ Deployment complete!"
 echo "Backend: http://$MINIKUBE_IP:30808/ or http://35.224.185.200/"
 echo "Grafana: http://$MINIKUBE_IP:30808/grafana or http://35.224.185.200/grafana"
+echo "Grafana login: admin / admin"
+echo "Prometheus (internal): http://prometheus:9090"
+echo "Elasticsearch (internal): http://elasticsearch:9200"
 RUN
 chmod +x run_full_stack.sh
 
